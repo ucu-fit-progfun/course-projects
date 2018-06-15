@@ -1,11 +1,21 @@
+{-|
+Module      : BoardGame
+Description : TODO Short description
+Copyright   : (c) Leonardo Val, 2018
+License     : MIT
+Maintainer  : leonardo.val@creatartis.com
+
+TODO Description.
+-}
 {-# LANGUAGE MultiParamTypeClasses, FunctionalDependencies, FlexibleInstances #-}
+{-# OPTIONS_HADDOCK hide, prune, ignore-exports #-}
 module BoardGame where
 
 import Data.Maybe (fromMaybe, fromJust)
 import System.Random (randomRIO)
 import System.IO (Handle, stdout, stdin, hGetLine, hPutStrLn)
 
-type BoardGameResult = Int
+-- * Board game classes and functions
 
 class (Show s, Eq s, Show p, Eq p, Enum p, Bounded p, Show a, Read a, Eq a) => BoardGame s p a | s -> p, s -> a where
    -- Minimal definitions.
@@ -18,7 +28,11 @@ class (Show s, Eq s, Show p, Eq p, Enum p, Bounded p, Show a, Read a, Eq a) => B
    activePlayers s = [p | p <- players s, not $ null $ actions s p]
    players :: s -> [p]
    players _ = [minBound .. maxBound]
---end class BoardGame
+
+-- | The 'BoardGameResult' is the type of the game's results. These are not necessarely the game 
+-- scores. Game results are used to distinguish victories, ties and defeats. Defeats must be 
+-- negative, victories possitive and ties zero.
+type BoardGameResult = Int
 
 nextPlayer :: (Eq p, Enum p, Bounded p) => p -> p
 nextPlayer p = if p == maxBound then minBound else (succ p)
@@ -36,8 +50,9 @@ isFinished s = null (activePlayers s)
 isActive :: (BoardGame s p a) => s -> p -> Bool
 isActive s p = elem p (activePlayers s)
 
--- Matches & Agents --------------------------------------------------------------------------------
+-- * Player agents and match coordination
 
+-- | 'BoardGameAgent' is the class that all player agents must instance.
 class (BoardGame s p a) => BoardGameAgent g s p a where
    play :: g -> s -> p -> IO a
 
@@ -69,11 +84,10 @@ match ags s = if (isFinished s) then
       _continuation <- match ags _nextState
       return (MatchActions _actions _nextState _continuation)
 
-{- ### RandomAgent #################################################################################
-
--}
+-- | A 'RandomAgent' is a player that picks its actions completely at random.
 data RandomAgent = RandomAgent deriving (Show)
 
+-- ^ When choosing an action, the Haskell's standard pseudo random generator is used. 
 instance (BoardGame s p a) => BoardGameAgent RandomAgent s p a where
    play RandomAgent s p = do
       let _actions = (actions s p)
@@ -83,16 +97,16 @@ instance (BoardGame s p a) => BoardGameAgent RandomAgent s p a where
          i <- randomRIO (0, (length _actions) - 1)
          return (_actions !! i)
 
+-- | A 'randomMatch' runs a match of a given game between 'RandomAgent's. 
 randomMatch :: (BoardGame s p a) => s -> IO (BoardGameMatch s p a)
 randomMatch s = match [(p, RandomAgent) | p <- players s] s
 
-{- ### FileAgent ################################################################################
-
--}
+-- | A 'FileAgent' is an agent defined by two file handles.
 data FileAgent = FileAgent Handle Handle deriving (Eq, Show)
 
-consoleAgent = FileAgent stdin stdout
-
+-- ^ Whenever a 'FileAgent' has to 'play', the current game state is written to the second handle,
+-- and a line of text is read from the first handle. The line is expected to have the string 
+-- representation of a valid game action. 
 instance (BoardGame s p a) => BoardGameAgent FileAgent s p a where
    play g@(FileAgent hin hout) s p = do
       let _actions = (actions s p)
@@ -106,21 +120,6 @@ instance (BoardGame s p a) => BoardGameAgent FileAgent s p a where
             hPutStrLn hout "Invalid move!"
             play g s p
 
--- Silly testbed definition ------------------------------------------------------------------------
-
-data Choose2Win_Player = Player1 | Player2 deriving (Eq, Show, Enum, Bounded)
-data Choose2Win_Action = Win | Lose | Pass deriving (Eq, Show, Read, Enum)
-data Choose2Win = Playing Choose2Win_Player | Finished Choose2Win_Player deriving (Eq, Show)
-
-instance BoardGame Choose2Win Choose2Win_Player Choose2Win_Action where
-   beginning = Playing Player1
-   actions (Playing ap) p | ap == p = [Win .. Pass]
-   actions _ _ = []
-   nextState s@(Finished _) _ = error ("nextState: game "++ (show s) ++" is finished!") 
-   nextState (Playing ap) [(p, Win)] | ap == p = Finished p
-   nextState (Playing ap) [(p, Lose)] | ap == p = Finished (nextPlayer p)
-   nextState (Playing ap) [(p, Pass)] | ap == p = Playing (nextPlayer p)
-   nextState s@(Playing ap) as = 
-      error ("nextState: invalid actions "++ (show as) ++" in game "++ (show s) ++"!") 
-   score (Playing _) = Nothing
-   score (Finished w) = Just [(p, if p == w then 1 else (-1)) | p <- [minBound .. maxBound]]
+-- | A 'consoleAgent' is a 'FileAgent' that uses the standard input to read actions and the standard 
+-- output to print game states.
+consoleAgent = FileAgent stdin stdout
